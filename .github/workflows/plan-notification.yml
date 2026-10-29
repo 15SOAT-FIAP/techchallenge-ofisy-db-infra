@@ -1,0 +1,12 @@
+name: plan notification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  database:
+    uses: ./.github/workflows/database-operation.yml
+    with:
+      service: notification
+      operation: plan
+    secrets: inherit

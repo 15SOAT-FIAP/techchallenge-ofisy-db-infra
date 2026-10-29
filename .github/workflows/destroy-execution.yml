@@ -1,0 +1,18 @@
+name: destroy execution
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Digite execution para confirmar a destruição desse banco'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  database:
+    uses: ./.github/workflows/database-operation.yml
+    with:
+      service: execution
+      operation: destroy
+      confirmation: ${{ inputs.confirmation }}
+    secrets: inherit

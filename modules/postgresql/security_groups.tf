@@ -4,12 +4,12 @@
 
 # Cria um Security Group para controlar o acesso à instância RDS PostgreSQL.
 resource "aws_security_group" "rds" {
-  name        = "${local.project_name}-rds-sg"
+  name        = "${var.name_prefix}-rds-sg"
   description = "Security Group para o banco de dados RDS PostgreSQL"
   vpc_id      = local.target_vpc_id
 
   tags = {
-    Name = "${local.project_name}-rds-sg"
+    Name = "${var.name_prefix}-rds-sg"
   }
 }
 
@@ -45,11 +45,11 @@ resource "aws_security_group_rule" "rds_postgres_from_eks_nodes" {
 
 # Permite conexões PostgreSQL provenientes da Lambda de autenticação de clientes.
 resource "aws_security_group_rule" "rds_postgres_from_lambda_auth" {
+  count                    = var.allow_lambda_auth ? 1 : 0
   type                     = "ingress"
   from_port                = 5432
   to_port                  = 5432
   protocol                 = "tcp"
-  source_security_group_id = data.aws_security_group.lambda_auth.id
+  source_security_group_id = data.aws_security_group.lambda_auth[0].id
   security_group_id        = aws_security_group.rds.id
 }
-

@@ -1,0 +1,56 @@
+name: Validate database infrastructure
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [core, billing, stock, execution, notification]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.7
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive
+      - run: terraform -chdir=${{ matrix.service }} init -backend=false -input=false -lockfile=readonly
+      - run: terraform -chdir=${{ matrix.service }} validate
+      - run: node --test scripts/*.test.cjs
+      - name: Test contracts and legacy migration without AWS
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          terraform -chdir="$SERVICE" test -json -verbose > test-results.jsonl
+          node scripts/assert-test-report.cjs test-results.jsonl "$SERVICE"
+  dynamodb-local:
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack:4.9.0
+        env:
+          SERVICES: dynamodb
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.7
+          terraform_wrapper: false
+      - name: Generate table contract from Terraform
+        run: |
+          terraform -chdir=notification init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=notification test -json -verbose > notification-tests.jsonl
+          node scripts/assert-test-report.cjs notification-tests.jsonl notification
+          node scripts/notification-spec.cjs notification-tests.jsonl notification-spec.json
+      - name: Exercise consumer access patterns in LocalStack
+        env:
+          LOCALSTACK_CONTAINER: ${{ job.services.localstack.id }}
+        run: |
+          docker cp notification-spec.json "$LOCALSTACK_CONTAINER:/tmp/notification-spec.json"
+          docker cp scripts/notification-smoke.py "$LOCALSTACK_CONTAINER:/tmp/notification-smoke.py"
+          docker exec "$LOCALSTACK_CONTAINER" python /tmp/notification-smoke.py /tmp/notification-spec.json
