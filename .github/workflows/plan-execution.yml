@@ -1,0 +1,12 @@
+name: plan execution
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  database:
+    uses: ./.github/workflows/database-operation.yml
+    with:
+      service: execution
+      operation: plan
+    secrets: inherit

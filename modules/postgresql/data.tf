@@ -55,6 +55,7 @@ data "aws_eks_cluster" "main" {
 
 # Busca o Security Group da Lambda de autenticação para permitir tráfego no RDS.
 data "aws_security_group" "lambda_auth" {
+  count = var.allow_lambda_auth ? 1 : 0
   filter {
     name   = "vpc-id"
     values = [local.target_vpc_id]
@@ -65,4 +66,3 @@ data "aws_security_group" "lambda_auth" {
     values = ["${local.project_name}-lambda-auth-sg"]
   }
 }
-

@@ -1,17 +1,17 @@
-# Terraform
 .terraform/
 *.tfstate
 *.tfstate.*
 *.tfvars
 backend.hcl
+*.tfplan
 plan.txt
-.terraform.lock.hcl
-
-# IDEs
+plan.json
+*-tests.jsonl
+test-results.jsonl
+notification-spec.json
+crash.log
 .idea/
 .vscode/
 *.iml
-
-# OS
 .DS_Store
 Thumbs.db

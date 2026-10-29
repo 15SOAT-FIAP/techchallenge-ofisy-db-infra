@@ -1,0 +1,18 @@
+name: destroy notification
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Digite notification para confirmar a destruição desse banco'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  database:
+    uses: ./.github/workflows/database-operation.yml
+    with:
+      service: notification
+      operation: destroy
+      confirmation: ${{ inputs.confirmation }}
+    secrets: inherit

@@ -1,157 +1,131 @@
-# Ofisy - Infraestrutura do Banco de Dados Gerenciado (RDS PostgreSQL)
+# Ofisy — infraestrutura de bancos
 
-Este repositório é responsável pelo provisionamento automatizado via **Terraform** da infraestrutura do banco de dados relacional gerenciado **Amazon RDS PostgreSQL** para a plataforma **Ofisy**, conforme os requisitos do **Tech Challenge (Fase 3 - SOAT / FIAP)**.
+Um repositório, cinco raízes e cinco states independentes, conforme
+[ADR-0013](https://github.com/15SOAT-FIAP/techchallenge-ofisy/blob/12e511c86ad9243837c2429ef508fa8de7939f94/docs/adr/0013-utilizar-dynamodb-no-ms-ofisy-notification.md)
+e [ADR-0014](https://github.com/15SOAT-FIAP/techchallenge-ofisy/blob/12e511c86ad9243837c2429ef508fa8de7939f94/docs/adr/0014-manter-a-infraestrutura-de-bancos-em-um-unico-repositorio.md).
+O ambiente AWS é **efêmero**: é válido que nenhum banco ou cluster esteja provisionado.
+O bucket existente sobrevive ao ciclo do ambiente; cada serviço tem deploy/destroy próprio.
 
----
+| Raiz | Recurso / banco | Chave S3 |
+|---|---|---|
+| `core/` | RDS `ofisy-postgres-db` / `ofisydb` | `rds/terraform.tfstate` (preservada) |
+| `billing/` | RDS `ofisy-billing-postgres-db` / `ofisy_billing` | `databases/billing/terraform.tfstate` |
+| `stock/` | RDS `ofisy-stock-postgres-db` / `ofisy_stock` | `databases/stock/terraform.tfstate` |
+| `execution/` | RDS `ofisy-execution-postgres-db` / `ofisy_execution` | `databases/execution/terraform.tfstate` |
+| `notification/` | DynamoDB `Notifications` | `databases/notification/terraform.tfstate` |
 
-## Propósito do Repositório
+As quatro raízes PostgreSQL usam `modules/postgresql/`. Alterações no módulo exigem
+validação/plan nas quatro raízes e um deploy próprio para cada banco. Não usar `-target`
+para separar serviços. O core preserva parâmetros e seis outputs do RDS legado.
+Antes de operar sobre um state existente, leia o [procedimento de migração](docs/migration-core.md).
 
-Garantir o isolamento, alta disponibilidade, segurança e gerenciamento do ciclo de vida do banco de dados PostgreSQL na AWS. O banco de dados é provisionado em subnets privadas dentro da VPC da aplicação e configurado com regras restritas de acesso via Security Groups.
+## Subida e desmontagem do ambiente
 
----
+1. Subir rede, EKS e SGs de origem no [eks-infra](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra).
+2. Subir somente os bancos necessários. Os RDS descobrem `ofisy-vpc`, subnets
+   `ofisy-private-subnet-*`, `ofisy-eks-sg` e o SG dos nós do `ofisy-cluster`.
+3. Core também libera `ofisy-lambda-auth-sg`, criado pela rede. A Lambda de autenticação
+   deve ser provisionada depois do core; os outros bancos não dependem dela.
+4. Configurar aplicações com credenciais/endpoints e iniciar os consumidores.
 
-## Estrutura do Repositório
+A criação da tabela DynamoDB não depende da VPC/EKS; sua aplicação precisa de rede e IAM.
+Para desmontar, parar consumidores/aplicações, remover dependências como a Lambda antes
+do core, destruir cada banco necessário pelo workflow próprio e só então remover rede/EKS.
+O bucket não é criado nem destruído por essas raízes. As instâncias mantêm a política
+legada `skip_final_snapshot = true`, sem `prevent_destroy`: o destroy autorizado apaga
+dados, portanto backups necessários devem ser tratados antes da desmontagem.
 
-```
-techchallenge-ofisy-rds-infra/
-├── .github/
-│   └── workflows/
-│       └── deploy-rds.yml      # Pipeline CI/CD no GitHub Actions
-├── infra/
-│   ├── main.tf                 # Configuração do provedor AWS e locals
-│   ├── variables.tf            # Variáveis de entrada (db_password, account_id, etc.)
-│   ├── data.tf                 # Busca dinâmica de VPC, Subnets e SG do EKS
-│   ├── rds.tf                  # Instância RDS PostgreSQL e DB Subnet Group
-│   ├── security_groups.tf      # Security Group do RDS e regras de tráfego
-│   ├── outputs.tf              # Endpoints e saídas do banco de dados
-│   ├── backend.tf              # Backend remoto no S3
-│   ├── backend.hcl.example     # Exemplo de configuração do backend S3
-│   └── terraform.tfvars.example# Exemplo de arquivo de variáveis
-└── README.md                   # Documentação oficial do repositório
-```
+Os SGs de origem são do `eks-infra`; o SG de cada RDS e suas regras permanecem neste
+repositório. A [divergência textual com a ADR-0014](docs/migration-core.md) é documentada:
+transferir a propriedade do SG legado exige alteração coordenada em dois states.
 
----
+## Contrato de notification
 
-## Tecnologias Utilizadas
+Referência: `origin/stack/06-rest-api`,
+[`8d6cba50dfcd03ff5c8fed07dc17ad407a0bcbb3`](https://github.com/15SOAT-FIAP/ms-ofisy-notification/tree/8d6cba50dfcd03ff5c8fed07dc17ad407a0bcbb3).
+A persistência ainda está na stack de PRs; não está no `master` de notification.
 
-- **[Terraform](https://www.terraform.io/)** (>= 1.5.0): Infraestrutura como Código (IaC).
-- **[Amazon RDS (Relational Database Service)](https://aws.amazon.com/rds/)**: Instância gerenciada do PostgreSQL 15.
-- **[Amazon VPC](https://aws.amazon.com/vpc/)**: Subnet Groups e isolamento de rede privada.
-- **[GitHub Actions](https://github.com/features/actions)**: Pipeline automatizada de CI/CD para plan e apply da infraestrutura.
+- `Notifications`, capacidade `PAY_PER_REQUEST`, partition key `id` String.
+- `TypeIndex`: partition key `type` String, sort key `createdAt` String, projeção `ALL`.
+- `ReferenceIdIndex`: partition key `referenceId` String, projeção `ALL`.
+- `read` é booleano comum filtrado na consulta por tipo; o código não usa índice separado
+  para leitura. `message` e `updatedAt` também não são chaves.
+- Categorias `LOW_STOCK` e `QUOTE_GENERATED` preservadas. GSIs têm consistência eventual.
+- Sem TTL: não há retenção definida nem atributo de expiração no serviço.
+- Outputs `table_name`, `table_arn` e `index_arns` para integração com runtime/IAM.
 
----
+Mensageria, permissões da identidade da aplicação e migração PostgreSQL → DynamoDB
+não são provisionadas neste PR.
 
-## Arquitetura do Banco de Dados
+## Validação sem ambiente AWS
 
-```mermaid
-graph TD
-    subgraph AWS Cloud - us-east-1
-        subgraph VPC ["VPC (ofisy-vpc)"]
-            subgraph PrivateSubnets ["Subnets Privadas (AZ-a & AZ-b)"]
-                DBSubnetGroup["DB Subnet Group (ofisy-db-subnet-group)"]
-                RDSInstance["Amazon RDS PostgreSQL<br/>(ofisydb / db.t3.micro)"]
-                DBSubnetGroup --> RDSInstance
-            end
+Terraform >= 1.11 (testes usam `state_key`), Node.js >= 20, Docker para integração local.
+CI fixa Terraform 1.15.7 e LocalStack 4.9.0; lockfiles fixam AWS provider 5.100.0.
 
-            subgraph SecurityGroups ["Segurança de Rede"]
-                RDSSG["Security Group: ofisy-rds-sg<br/>Inbound: Porta 5432 apenas dos SGs autorizados"]
-            end
-        end
-
-        EKSSG["EKS Cluster Security Group<br/>(ofisy-eks-sg)"] -->|Porta 5432| RDSSG
-        LambdaSG["Lambda de Autenticacao<br/>(ofisy-lambda-auth-sg)"] -->|Porta 5432| RDSSG
-        RDSSG --> RDSInstance
-    end
-```
-
-Os dois Security Groups de origem são criados pela [infraestrutura base](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra) e localizados aqui por tag. O SG da Lambda é criado lá, e não junto da função, para que esta regra de liberação não dependa do state da Lambda, que por sua vez depende deste banco.
-
----
-
-## Ordem de Execução entre os Repositórios
-
-Este repositório é a **etapa 3** de um fluxo de cinco. Ele não cria a rede: localiza a VPC, as subnets privadas e os Security Groups por tag, então a infraestrutura base precisa já estar provisionada. Da mesma forma, a Lambda de autenticação só pode ser criada depois que este banco existir.
-
-```mermaid
-flowchart TD
-    P1["1 · eks-infra — infra/<br/>Rede, EKS, ECR e Security Groups"]
-    P2["2 · techchallenge-ofisy-auth<br/>CD publica a imagem da Lambda no ECR"]
-    P3["3 · techchallenge-ofisy-rds-infra<br/>Banco de dados RDS PostgreSQL"]
-    P4["4 · eks-infra — infra-auth/<br/>Lambda de autenticacao"]
-    P5["5 · techchallenge-ofisy<br/>Aplicacao Spring Boot no EKS"]
-
-    P1 --> P2 --> P3 --> P4 --> P5
+```sh
+terraform fmt -check -recursive
+terraform -chdir=core init -backend=false -input=false -lockfile=readonly
+terraform -chdir=core validate
+terraform -chdir=core test -json -verbose > core-tests.jsonl
+node scripts/assert-test-report.cjs core-tests.jsonl core
+node --test scripts/check-core-plan.test.cjs
 ```
 
-Se o `terraform plan` falhar aqui com um erro de que nenhum Security Group corresponde ao filtro, é sinal de que a etapa 1 não rodou ou rodou em uma versão anterior, que ainda não criava o `ofisy-lambda-auth-sg`.
+Repetir init/validate/test por raiz. Os testes usam provider **mock**, inclusive o `apply`
+do ensaio legado, que cria apenas state simulado. O gate exige sete movimentos `no-op`
+no core e falha com testes ausentes, erros ou skips. A integração gera a definição da
+tabela a partir do state Terraform simulado e a cria em LocalStack: GetItem, dois GSIs,
+projeção, categorias, ordenação, paginação, leitura e inserção condicional idempotente.
 
-Para **destruir**, siga o caminho inverso: a Lambda (etapa 4) precisa ser destruída antes deste banco.
+## Configuração e plan AWS
 
----
+O backend usa o bucket existente `ofisy-tfstate-<account_id>`, `us-east-1`. Cada raiz fixa
+sua chave e ativa lock nativo S3 (`use_lockfile`), que requer permissões sobre o objeto
+`.tflock`. Os exemplos `backend.hcl.example` recebem somente bucket e região.
+Nunca versionar state, senhas, tfvars reais ou planos; planos/state podem conter segredos.
 
-## Passos para Execução e Deploy
+Para plan quando houver ambiente AWS disponível, copiar o exemplo para `core/backend.hcl`,
+informar `TF_VAR_account_id` e a senha vigente em `TF_VAR_db_password`:
 
-### 1. Pré-requisitos Locais
-
-- **Terraform CLI** (versão 1.5.0 ou superior)
-- **AWS CLI** configurada com credenciais com permissão para gerenciar instâncias RDS e VPC.
-
-### 2. Configuração do Backend e Variáveis
-
-Acesse o diretório `infra/`:
-
-```bash
-cd infra
+```sh
+terraform -chdir=core init -backend-config=backend.hcl -lockfile=readonly
+terraform -chdir=core plan -out=operation.tfplan
+terraform -chdir=core show -json operation.tfplan > core/plan.json
+node scripts/check-core-plan.cjs core/plan.json
 ```
 
-Crie o arquivo `infra/backend.hcl` para o Remote State do S3:
+O gate permite criação em ambiente vazio e impede exclusão/substituição no deploy do core.
+Se o RDS existe e o state não foi localizado, recuperar o state correto antes de operar.
+Não trocar a chave nem criar outro state para contornar esse cenário.
 
-```hcl
-bucket = "ofisy-tfstate-<SEU_AWS_ACCOUNT_ID>"
-key    = "rds/terraform.tfstate"
-region = "us-east-1"
-```
+## Workflows
 
-Crie o arquivo `infra/terraform.tfvars`:
+Cada serviço tem `plan-<serviço>.yml`, `deploy-<serviço>.yml`, `destroy-<serviço>.yml`.
+A execução compartilhada está em `database-operation.yml`.
 
-```hcl
-account_id  = "<SEU_AWS_ACCOUNT_ID>"
-db_password = "<SUA_SENHA_DO_BANCO_RDS>"
-```
+- `validate.yml`: automático em PR e push em master; cinco raízes sem credenciais AWS,
+  ensaio de migração e integração DynamoDB local. Uma alteração no módulo é testada nos
+  quatro serviços PostgreSQL, mesmo sem ambiente de pé.
+- Plan AWS: **manual**, selecionando o workflow do serviço e a branch. Não exige AWS
+  permanentemente disponível para validar PRs. Os RDS dependem da rede/EKS para esse plan.
+- Deploy: manual e somente `master`; gera e aplica exatamente o plano salvo.
+- Destroy: manual e somente `master`, exige digitar o nome exato do serviço; aplica plano
+  de destruição salvo. Não existe destroy conjunto dos cinco bancos.
+- Plan/deploy/destroy compartilham concorrência `database-<serviço>`, sem cancelamento,
+  além do lock S3. Isolamento de state não equivale a isolamento de permissões IAM.
+- Não há criação automática de bucket. Plan é apresentado no resumo do run, sem upload
+  de binário nem comentário automático no PR. Nenhum workflow AWS é disparado por este PR.
 
-### 3. Execução dos Comandos Terraform
+Secrets em `AWS_ACADEMY` ou herdados da organização:
 
-```bash
-# Inicializa os provedores e o backend remoto
-terraform init -backend-config=backend.hcl
+| Secret | Uso |
+|---|---|
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Sessão AWS Academy |
+| `AWS_ACCOUNT_ID` | Conta esperada e sufixo do bucket |
+| `DB_PASSWORD` | Senha atual do core, preservada |
+| `DB_PASSWORD_BILLING` | Senha billing |
+| `DB_PASSWORD_STOCK` | Senha stock |
+| `DB_PASSWORD_EXECUTION` | Senha execution |
 
-# Visualiza o plano de execução
-terraform plan
-
-# Aplica as alterações e cria o RDS
-terraform apply -auto-approve
-```
-
----
-
-## Pipeline CI/CD (GitHub Actions)
-
-A pipeline é executada automaticamente em qualquer `push` ou `pull_request` nas branches `main`/`master`.
-
-### Secrets Necessárias:
-
-Definidas como **Organization Secrets** na org `15SOAT-FIAP`, compartilhadas entre os repositórios da Fase 3:
-
-- `AWS_ACCESS_KEY_ID`: Chave de acesso AWS.
-- `AWS_SECRET_ACCESS_KEY`: Chave secreta AWS.
-- `AWS_SESSION_TOKEN`: Token de sessão (para AWS Academy / SSO).
-- `AWS_ACCOUNT_ID`: ID numérico da conta AWS.
-- `DB_PASSWORD`: Senha master do PostgreSQL (mínimo 8 caracteres).
-
----
-
-## Repositórios Relacionados & Documentação
-
-- **Aplicação Principal (Kubernetes):** [techchallenge-ofisy](https://github.com/15SOAT-FIAP/techchallenge-ofisy)
-- **Infraestrutura Kubernetes (EKS):** [techchallenge-ofisy-eks-infra](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra)
-- **Documentação Swagger/Postman:** Disponível no endpoint da Aplicação Principal (`/swagger-ui/index.html`).
+Notification não exige senha. As senhas entram por variáveis de ambiente, sem gravar HCL.
+Não é necessário executar apply/destroy na AWS para validar ou revisar esta alteração.
