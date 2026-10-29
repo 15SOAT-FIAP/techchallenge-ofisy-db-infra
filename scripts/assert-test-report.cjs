@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 function checkReport(entries, service) {
 const summary = entries.find(e => e.type === 'test_summary')?.test_summary;
 assert(summary && summary.status === 'pass' && summary.failed === 0 && summary.errored === 0 && summary.skipped === 0, 'Testes ausentes, falhos ou pulados');
+assert.equal(summary.passed, service === 'core' ? 3 : 1, 'Quantidade inesperada: algum cenário obrigatório não foi executado');
 if (service === 'core') {
   const plan = entries.find(e => e.type === 'test_plan' && e['@testrun'] === 'migration')?.test_plan;
   const resources = plan?.resource_changes?.filter(r => r.mode === 'managed');

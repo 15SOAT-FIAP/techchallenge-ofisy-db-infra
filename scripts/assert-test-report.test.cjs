@@ -6,6 +6,7 @@ const migration = {type:'test_plan', '@testrun':'migration', test_plan:{resource
 test('aceita evidência completa da migração', () => assert.doesNotThrow(() => checkReport([summary,migration], 'core')));
 test('rejeita skips, falhas, erros e relatório ausente', () => {
   assert.throws(() => checkReport([], 'core'));
+  assert.throws(() => checkReport([{...summary,test_summary:{...summary.test_summary,passed:0}},migration], 'core'));
   for (const key of ['skipped','failed','errored']) assert.throws(() => checkReport([{...summary,test_summary:{...summary.test_summary,[key]:1}},migration], 'core'));
 });
 test('rejeita migração ausente, parcial ou com substituição', () => {
