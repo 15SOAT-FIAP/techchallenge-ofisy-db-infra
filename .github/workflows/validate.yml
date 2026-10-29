@@ -17,6 +17,7 @@ jobs:
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.15.7
+          terraform_wrapper: false
       - run: terraform fmt -check -recursive
       - run: terraform -chdir=${{ matrix.service }} init -backend=false -input=false -lockfile=readonly
       - run: terraform -chdir=${{ matrix.service }} validate
@@ -39,6 +40,7 @@ jobs:
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.15.7
+          terraform_wrapper: false
       - name: Generate table contract from Terraform
         run: |
           terraform -chdir=notification init -backend=false -input=false -lockfile=readonly
