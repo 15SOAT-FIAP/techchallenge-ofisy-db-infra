@@ -1,0 +1,47 @@
+name: Validar Terraform
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  fmt:
+    name: Terraform Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      - name: Terraform Format
+        run: terraform fmt -check -recursive
+
+  validate:
+    name: Validar ${{ matrix.service }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [core, billing, stock, execution, notification]
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      - name: Terraform Validate
+        working-directory: ${{ matrix.service }}
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: Terraform Test (contrato da tabela do notification)
+        if: matrix.service == 'notification'
+        working-directory: notification
+        run: terraform test
