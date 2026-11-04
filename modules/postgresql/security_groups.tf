@@ -13,24 +13,16 @@ resource "aws_security_group" "rds" {
   }
 }
 
-# Permite conexões PostgreSQL provenientes do Security Group do EKS.
-resource "aws_security_group_rule" "rds_postgres_from_eks" {
-  type                     = "ingress"
-  from_port                = 5432
-  to_port                  = 5432
-  protocol                 = "tcp"
-  source_security_group_id = data.aws_security_group.eks.id
-  security_group_id        = aws_security_group.rds.id
-}
-
-# Permite conexões PostgreSQL provenientes dos nós do EKS (Cluster Security Group).
-resource "aws_security_group_rule" "rds_postgres_from_eks_nodes" {
-  type                     = "ingress"
-  from_port                = 5432
-  to_port                  = 5432
-  protocol                 = "tcp"
-  source_security_group_id = data.aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
-  security_group_id        = aws_security_group.rds.id
+# Permite conexões PostgreSQL de dentro da VPC (nós dos clusters EKS).
+# Liberar pelo CIDR, e não pelo Security Group do cluster, deixa o banco
+# independente do ciclo de vida do cluster: recriar um cluster gera um SG novo.
+resource "aws_security_group_rule" "rds_postgres_from_vpc" {
+  type              = "ingress"
+  from_port         = 5432
+  to_port           = 5432
+  protocol          = "tcp"
+  cidr_blocks       = [data.aws_vpc.main.cidr_block]
+  security_group_id = aws_security_group.rds.id
 }
 
 # Permite conexões PostgreSQL provenientes da Lambda de autenticação de clientes.

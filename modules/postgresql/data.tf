@@ -29,24 +29,6 @@ data "aws_subnets" "private" {
   }
 }
 
-# Busca o Security Group do EKS para permitir tráfego no RDS
-data "aws_security_group" "eks" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.main.id]
-  }
-
-  filter {
-    name   = "tag:Name"
-    values = ["${local.project_name}-eks-sg"]
-  }
-}
-
-# Busca o cluster EKS do próprio microsserviço para permitir tráfego dos nós no RDS
-data "aws_eks_cluster" "main" {
-  name = "ms-${local.project_name}-${var.service}-cluster"
-}
-
 # Busca o Security Group da Lambda de autenticação para permitir tráfego no RDS.
 data "aws_security_group" "lambda_auth" {
   count = var.allow_lambda_auth ? 1 : 0
