@@ -42,9 +42,9 @@ data "aws_security_group" "eks" {
   }
 }
 
-# Busca o cluster EKS para permitir tráfego dos nós no RDS
+# Busca o cluster EKS do próprio microsserviço para permitir tráfego dos nós no RDS
 data "aws_eks_cluster" "main" {
-  name = "${local.project_name}-cluster"
+  name = "ms-${local.project_name}-${var.service}-cluster"
 }
 
 # Busca o Security Group da Lambda de autenticação para permitir tráfego no RDS.
