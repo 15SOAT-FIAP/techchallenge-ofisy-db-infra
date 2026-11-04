@@ -46,17 +46,17 @@ graph TD
             Execution["RDS ms-ofisy-execution-db"]
         end
 
-        EKSCore["ms-ofisy-core-cluster"] -->|5432| Core
-        EKSBilling["ms-ofisy-billing-cluster"] -->|5432| Billing
-        EKSStock["ms-ofisy-stock-cluster"] -->|5432| Stock
-        EKSExecution["ms-ofisy-execution-cluster"] -->|5432| Execution
+        EKS["Clusters EKS<br/>(CIDR da VPC)"] -->|5432| Core
+        EKS -->|5432| Billing
+        EKS -->|5432| Stock
+        EKS -->|5432| Execution
         LambdaSG["Lambda de Autenticacao<br/>(ofisy-lambda-auth-sg)"] -->|5432| Core
 
         Dynamo["DynamoDB Notifications"]
     end
 ```
 
-Cada RDS tem o próprio Security Group (`ms-ofisy-<service>-db-sg`), liberando a porta 5432 para o `ofisy-eks-sg` e para os nós do cluster do próprio serviço (`ms-ofisy-<service>-cluster`). Só o core libera também a Lambda de autenticação. A VPC, as subnets e os Security Groups de origem são criados pela [infraestrutura base](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra) e localizados aqui por tag.
+Cada RDS tem o próprio Security Group (`ms-ofisy-<service>-db-sg`), liberando a porta 5432 para o CIDR da VPC. Liberar pelo CIDR, e não pelo Security Group de cada cluster, deixa os bancos independentes dos clusters: recriar um cluster não exige um novo deploy do banco. Só o core libera também a Lambda de autenticação. A VPC, as subnets e o Security Group da Lambda são criados pela [infraestrutura base](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra) e localizados aqui por tag.
 
 A tabela `Notifications` usa `PAY_PER_REQUEST`, chave `id` e dois índices: `TypeIndex` (`type` + `createdAt`) e `ReferenceIdIndex` (`referenceId`).
 
@@ -64,18 +64,22 @@ A tabela `Notifications` usa `PAY_PER_REQUEST`, chave `id` e dois índices: `Typ
 
 ## Ordem de Execução entre os Repositórios
 
-Os RDS dependem da rede e do cluster do próprio serviço. A Lambda de autenticação depende do banco do core.
+Os RDS dependem só da rede. A Lambda de autenticação depende do banco do core, e cada microsserviço depende do seu cluster e do seu banco.
 
 ```mermaid
 flowchart TD
     P1["1 · eks-infra — infra/<br/>Rede e Security Groups"]
     P2["2 · eks-infra — eks/&lt;service&gt;/<br/>Cluster EKS de cada microsserviço"]
-    P3["3 · db-infra — deploy (all)<br/>Bancos dos microsserviços"]
-    P4["4 · eks-infra — infra-auth/<br/>Lambda de autenticacao"]
-    P5["5 · Microsserviços no EKS"]
+    P3["2 · db-infra — deploy (all)<br/>Bancos dos microsserviços"]
+    P4["3 · eks-infra — infra-auth/<br/>Lambda de autenticacao"]
+    P5["4 · Microsserviços no EKS"]
 
-    P1 --> P2 --> P3 --> P4 --> P5
+    P1 --> P2 --> P5
+    P1 --> P3 --> P4 --> P5
+    P3 --> P5
 ```
+
+Clusters e bancos não dependem uns dos outros e podem subir em paralelo.
 
 O DynamoDB do notification não depende de rede nem de cluster.
 
