@@ -5,6 +5,7 @@
 *.tfvars
 backend.hcl
 plan.txt
+tfplan
 .terraform.lock.hcl
 
 # IDEs

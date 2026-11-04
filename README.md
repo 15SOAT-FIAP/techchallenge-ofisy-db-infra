@@ -1,157 +1,124 @@
-# Ofisy - Infraestrutura do Banco de Dados Gerenciado (RDS PostgreSQL)
+# Ofisy - Infraestrutura dos Bancos de Dados
 
-Este repositório é responsável pelo provisionamento automatizado via **Terraform** da infraestrutura do banco de dados relacional gerenciado **Amazon RDS PostgreSQL** para a plataforma **Ofisy**, conforme os requisitos do **Tech Challenge (Fase 3 - SOAT / FIAP)**.
+Este repositório provisiona via **Terraform** os bancos de dados dos microsserviços da plataforma **Ofisy**, conforme os requisitos do **Tech Challenge (SOAT / FIAP)**. Cada microsserviço tem o seu próprio banco, com state e ciclo de vida independentes.
+
+O ambiente roda no **AWS Academy** e é efêmero: os bancos são criados para a apresentação e destruídos ao fim da sessão. Por isso não há backups automáticos nem proteções contra exclusão.
 
 ---
 
-## Propósito do Repositório
+## Bancos Provisionados
 
-Garantir o isolamento, alta disponibilidade, segurança e gerenciamento do ciclo de vida do banco de dados PostgreSQL na AWS. O banco de dados é provisionado em subnets privadas dentro da VPC da aplicação e configurado com regras restritas de acesso via Security Groups.
+| Diretório | Microsserviço | Recurso | Banco / Tabela | Chave do state |
+|---|---|---|---|---|
+| `core/` | ms-ofisy-core | RDS `ms-ofisy-core-db` | `ms_ofisy_core_db` | `databases/core/terraform.tfstate` |
+| `billing/` | ms-ofisy-billing | RDS `ms-ofisy-billing-db` | `ms_ofisy_billing_db` | `databases/billing/terraform.tfstate` |
+| `stock/` | ms-ofisy-stock | RDS `ms-ofisy-stock-db` | `ms_ofisy_stock_db` | `databases/stock/terraform.tfstate` |
+| `execution/` | ms-ofisy-execution | RDS `ms-ofisy-execution-db` | `ms_ofisy_execution_db` | `databases/execution/terraform.tfstate` |
+| `notification/` | ms-ofisy-notification | DynamoDB | `Notifications` | `databases/notification/terraform.tfstate` |
+
+Os RDS são PostgreSQL 15, `db.t3.micro`, em subnets privadas, com usuário `admin_db` e senha vinda da secret `DB_PASSWORD`. Todos usam o módulo `modules/postgresql/`.
 
 ---
 
 ## Estrutura do Repositório
 
 ```
-techchallenge-ofisy-rds-infra/
-├── .github/
-│   └── workflows/
-│       └── deploy-rds.yml      # Pipeline CI/CD no GitHub Actions
-├── infra/
-│   ├── main.tf                 # Configuração do provedor AWS e locals
-│   ├── variables.tf            # Variáveis de entrada (db_password, account_id, etc.)
-│   ├── data.tf                 # Busca dinâmica de VPC, Subnets e SG do EKS
-│   ├── rds.tf                  # Instância RDS PostgreSQL e DB Subnet Group
-│   ├── security_groups.tf      # Security Group do RDS e regras de tráfego
-│   ├── outputs.tf              # Endpoints e saídas do banco de dados
-│   ├── backend.tf              # Backend remoto no S3
-│   ├── backend.hcl.example     # Exemplo de configuração do backend S3
-│   └── terraform.tfvars.example# Exemplo de arquivo de variáveis
-└── README.md                   # Documentação oficial do repositório
+├── .github/workflows/
+│   ├── deploy.yml          # Provisiona um banco ou todos (input "service")
+│   ├── destroy.yml         # Destrói um banco ou todos (input "service")
+│   └── validate.yml        # fmt + validate em PRs, sem acesso à AWS
+├── modules/postgresql/     # RDS, DB Subnet Group, Security Group e data sources de rede
+├── core/  billing/  stock/  execution/   # Uma raiz por microsserviço, chamando o módulo
+└── notification/           # Tabela DynamoDB do ms-ofisy-notification
 ```
 
 ---
 
-## Tecnologias Utilizadas
-
-- **[Terraform](https://www.terraform.io/)** (>= 1.5.0): Infraestrutura como Código (IaC).
-- **[Amazon RDS (Relational Database Service)](https://aws.amazon.com/rds/)**: Instância gerenciada do PostgreSQL 15.
-- **[Amazon VPC](https://aws.amazon.com/vpc/)**: Subnet Groups e isolamento de rede privada.
-- **[GitHub Actions](https://github.com/features/actions)**: Pipeline automatizada de CI/CD para plan e apply da infraestrutura.
-
----
-
-## Arquitetura do Banco de Dados
+## Arquitetura
 
 ```mermaid
 graph TD
     subgraph AWS Cloud - us-east-1
-        subgraph VPC ["VPC (ofisy-vpc)"]
-            subgraph PrivateSubnets ["Subnets Privadas (AZ-a & AZ-b)"]
-                DBSubnetGroup["DB Subnet Group (ofisy-db-subnet-group)"]
-                RDSInstance["Amazon RDS PostgreSQL<br/>(ofisydb / db.t3.micro)"]
-                DBSubnetGroup --> RDSInstance
-            end
-
-            subgraph SecurityGroups ["Segurança de Rede"]
-                RDSSG["Security Group: ofisy-rds-sg<br/>Inbound: Porta 5432 apenas dos SGs autorizados"]
-            end
+        subgraph VPC ["VPC (ofisy-vpc) - Subnets Privadas"]
+            Core["RDS ms-ofisy-core-db"]
+            Billing["RDS ms-ofisy-billing-db"]
+            Stock["RDS ms-ofisy-stock-db"]
+            Execution["RDS ms-ofisy-execution-db"]
         end
 
-        EKSSG["EKS Cluster Security Group<br/>(ofisy-eks-sg)"] -->|Porta 5432| RDSSG
-        LambdaSG["Lambda de Autenticacao<br/>(ofisy-lambda-auth-sg)"] -->|Porta 5432| RDSSG
-        RDSSG --> RDSInstance
+        EKS["Clusters EKS<br/>(CIDR da VPC)"] -->|5432| Core
+        EKS -->|5432| Billing
+        EKS -->|5432| Stock
+        EKS -->|5432| Execution
+        LambdaSG["Lambda de Autenticacao<br/>(ofisy-lambda-auth-sg)"] -->|5432| Core
+
+        Dynamo["DynamoDB Notifications"]
     end
 ```
 
-Os dois Security Groups de origem são criados pela [infraestrutura base](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra) e localizados aqui por tag. O SG da Lambda é criado lá, e não junto da função, para que esta regra de liberação não dependa do state da Lambda, que por sua vez depende deste banco.
+Cada RDS tem o próprio Security Group (`ms-ofisy-<service>-db-sg`), liberando a porta 5432 para o CIDR da VPC. Liberar pelo CIDR, e não pelo Security Group de cada cluster, deixa os bancos independentes dos clusters: recriar um cluster não exige um novo deploy do banco. Só o core libera também a Lambda de autenticação. A VPC, as subnets e o Security Group da Lambda são criados pela [infraestrutura base](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra) e localizados aqui por tag.
+
+A tabela `Notifications` usa `PAY_PER_REQUEST`, chave `id` e dois índices: `TypeIndex` (`type` + `createdAt`) e `ReferenceIdIndex` (`referenceId`).
 
 ---
 
 ## Ordem de Execução entre os Repositórios
 
-Este repositório é a **etapa 3** de um fluxo de cinco. Ele não cria a rede: localiza a VPC, as subnets privadas e os Security Groups por tag, então a infraestrutura base precisa já estar provisionada. Da mesma forma, a Lambda de autenticação só pode ser criada depois que este banco existir.
+Os RDS dependem só da rede. A Lambda de autenticação depende do banco do core, e cada microsserviço depende do seu cluster e do seu banco.
 
 ```mermaid
 flowchart TD
-    P1["1 · eks-infra — infra/<br/>Rede, EKS, ECR e Security Groups"]
-    P2["2 · techchallenge-ofisy-auth<br/>CD publica a imagem da Lambda no ECR"]
-    P3["3 · techchallenge-ofisy-rds-infra<br/>Banco de dados RDS PostgreSQL"]
-    P4["4 · eks-infra — infra-auth/<br/>Lambda de autenticacao"]
-    P5["5 · techchallenge-ofisy<br/>Aplicacao Spring Boot no EKS"]
+    P1["1 · eks-infra — infra/<br/>Rede e Security Groups"]
+    P2["2 · eks-infra — eks/&lt;service&gt;/<br/>Cluster EKS de cada microsserviço"]
+    P3["2 · db-infra — deploy (all)<br/>Bancos dos microsserviços"]
+    P4["3 · eks-infra — infra-auth/<br/>Lambda de autenticacao"]
+    P5["4 · Microsserviços no EKS"]
 
-    P1 --> P2 --> P3 --> P4 --> P5
+    P1 --> P2 --> P5
+    P1 --> P3 --> P4 --> P5
+    P3 --> P5
 ```
 
-Se o `terraform plan` falhar aqui com um erro de que nenhum Security Group corresponde ao filtro, é sinal de que a etapa 1 não rodou ou rodou em uma versão anterior, que ainda não criava o `ofisy-lambda-auth-sg`.
+Clusters e bancos não dependem uns dos outros e podem subir em paralelo.
 
-Para **destruir**, siga o caminho inverso: a Lambda (etapa 4) precisa ser destruída antes deste banco.
+O DynamoDB do notification não depende de rede nem de cluster.
+
+Para **destruir**, siga o caminho inverso: a Lambda precisa ser destruída antes do banco do core.
 
 ---
 
-## Passos para Execução e Deploy
+## Pipeline (GitHub Actions)
 
-### 1. Pré-requisitos Locais
+- **Deploy Bancos de Dados**: execução manual. Escolha `all` para subir todos em paralelo ou um serviço específico.
+- **Destruir Bancos de Dados**: execução manual, com o mesmo input.
+- **Validar Terraform**: roda em PRs e na `master` (`fmt` + `validate` em cada raiz, sem AWS).
 
-- **Terraform CLI** (versão 1.5.0 ou superior)
-- **AWS CLI** configurada com credenciais com permissão para gerenciar instâncias RDS e VPC.
+### Secrets Necessárias
 
-### 2. Configuração do Backend e Variáveis
+Definidas como **Organization Secrets** na org `15SOAT-FIAP`:
 
-Acesse o diretório `infra/`:
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`: credenciais da sessão do AWS Academy.
+- `AWS_ACCOUNT_ID`: ID da conta, usado no nome do bucket de state (`ofisy-tfstate-<account_id>`).
+- `DB_PASSWORD`: senha do usuário `admin_db` dos RDS (mínimo 8 caracteres).
 
-```bash
-cd infra
-```
+---
 
-Crie o arquivo `infra/backend.hcl` para o Remote State do S3:
-
-```hcl
-bucket = "ofisy-tfstate-<SEU_AWS_ACCOUNT_ID>"
-key    = "rds/terraform.tfstate"
-region = "us-east-1"
-```
-
-Crie o arquivo `infra/terraform.tfvars`:
-
-```hcl
-account_id  = "<SEU_AWS_ACCOUNT_ID>"
-db_password = "<SUA_SENHA_DO_BANCO_RDS>"
-```
-
-### 3. Execução dos Comandos Terraform
+## Execução Local
 
 ```bash
-# Inicializa os provedores e o backend remoto
-terraform init -backend-config=backend.hcl
-
-# Visualiza o plano de execução
+cd stock
+export TF_VAR_db_password="<SENHA>"
+terraform init \
+  -backend-config="bucket=ofisy-tfstate-<AWS_ACCOUNT_ID>" \
+  -backend-config="key=databases/stock/terraform.tfstate" \
+  -backend-config="region=us-east-1"
 terraform plan
-
-# Aplica as alterações e cria o RDS
-terraform apply -auto-approve
+terraform apply
 ```
 
 ---
 
-## Pipeline CI/CD (GitHub Actions)
+## Repositórios Relacionados
 
-A pipeline é executada automaticamente em qualquer `push` ou `pull_request` nas branches `main`/`master`.
-
-### Secrets Necessárias:
-
-Definidas como **Organization Secrets** na org `15SOAT-FIAP`, compartilhadas entre os repositórios da Fase 3:
-
-- `AWS_ACCESS_KEY_ID`: Chave de acesso AWS.
-- `AWS_SECRET_ACCESS_KEY`: Chave secreta AWS.
-- `AWS_SESSION_TOKEN`: Token de sessão (para AWS Academy / SSO).
-- `AWS_ACCOUNT_ID`: ID numérico da conta AWS.
-- `DB_PASSWORD`: Senha master do PostgreSQL (mínimo 8 caracteres).
-
----
-
-## Repositórios Relacionados & Documentação
-
-- **Aplicação Principal (Kubernetes):** [techchallenge-ofisy](https://github.com/15SOAT-FIAP/techchallenge-ofisy)
+- **Aplicação Principal:** [techchallenge-ofisy](https://github.com/15SOAT-FIAP/techchallenge-ofisy)
 - **Infraestrutura Kubernetes (EKS):** [techchallenge-ofisy-eks-infra](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra)
-- **Documentação Swagger/Postman:** Disponível no endpoint da Aplicação Principal (`/swagger-ui/index.html`).

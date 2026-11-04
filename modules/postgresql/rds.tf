@@ -4,11 +4,11 @@
 
 # DB Subnet Group exigido pelo RDS em subnets privadas de pelo menos 2 AZs
 resource "aws_db_subnet_group" "main" {
-  name       = "${local.project_name}-db-subnet-group"
-  subnet_ids = local.target_subnet_ids
+  name       = "${local.name_prefix}-subnet-group"
+  subnet_ids = data.aws_subnets.private.ids
 
   tags = {
-    Name = "${local.project_name}-db-subnet-group"
+    Name = "${local.name_prefix}-subnet-group"
   }
 }
 
@@ -18,22 +18,21 @@ resource "aws_db_subnet_group" "main" {
 
 # Instância Amazon RDS PostgreSQL gerenciada
 resource "aws_db_instance" "main" {
-  identifier             = "${local.project_name}-postgres-db"
+  identifier             = local.name_prefix
   allocated_storage      = 20
   storage_type           = "gp2"
   engine                 = "postgres"
   engine_version         = "15"
   instance_class         = "db.t3.micro"
-  username               = "ofisy"
+  username               = "admin_db"
   password               = var.db_password
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  db_name = "ofisydb"
+  db_name = local.database_name
 
-  backup_retention_period = 7
-  backup_window           = "03:00-04:00"
-  maintenance_window      = "sun:04:00-sun:05:00"
+  # Ambiente efêmero (AWS Academy): sem backups automáticos para subir/destruir mais rápido
+  backup_retention_period = 0
 
   skip_final_snapshot = true
   multi_az            = false
@@ -41,11 +40,7 @@ resource "aws_db_instance" "main" {
   storage_encrypted   = true
 
   tags = {
-    Name = "${local.project_name}-postgres-db"
+    Name    = local.name_prefix
+    Service = "ms-ofisy-${var.service}"
   }
-
-  depends_on = [
-    aws_security_group.rds,
-    aws_db_subnet_group.main
-  ]
 }
