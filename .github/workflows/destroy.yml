@@ -56,29 +56,18 @@ jobs:
         with:
           terraform_wrapper: false
 
-      # Sem o bucket o terraform init falha. Se ele não existe, não há state
-      # e portanto nada a destruir.
-      - name: Verificar Bucket S3 do Terraform State
-        id: bucket
+      - name: Terraform Destroy
         run: |
-          if aws s3api head-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" 2>/dev/null; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
+          if ! aws s3api head-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" 2>/dev/null; then
             echo "Bucket de state não existe, nada a destruir."
-            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-      - name: Terraform Init
-        if: steps.bucket.outputs.exists == 'true'
-        run: |
           terraform init \
             -backend-config="bucket=ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
             -backend-config="key=databases/${{ matrix.service }}/terraform.tfstate" \
             -backend-config="region=us-east-1"
 
-      - name: Terraform Destroy
-        if: steps.bucket.outputs.exists == 'true'
-        run: |
           if [ -z "$(terraform state list)" ]; then
             echo "State vazio, nada a destruir."
             exit 0
