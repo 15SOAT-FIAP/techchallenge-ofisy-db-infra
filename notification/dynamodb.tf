@@ -28,6 +28,11 @@ resource "aws_dynamodb_table" "notifications" {
     type = "S"
   }
 
+  attribute {
+    name = "customerId"
+    type = "S"
+  }
+
   # Consulta de notificações por tipo, ordenadas por data
   global_secondary_index {
     name            = "TypeIndex"
@@ -40,6 +45,13 @@ resource "aws_dynamodb_table" "notifications" {
   global_secondary_index {
     name            = "ReferenceIdIndex"
     hash_key        = "referenceId"
+    projection_type = "ALL"
+  }
+
+  global_secondary_index {
+    name            = "CustomerIdIndex"
+    hash_key        = "customerId"
+    range_key       = "createdAt"
     projection_type = "ALL"
   }
 
