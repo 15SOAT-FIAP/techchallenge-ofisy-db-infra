@@ -93,6 +93,14 @@ Para **destruir**, siga o caminho inverso: a Lambda precisa ser destruída antes
 - **Destruir Bancos de Dados**: execução manual, com o mesmo input.
 - **Validar Terraform**: roda em PRs e na `master` (`fmt` + `validate` em cada raiz, sem AWS).
 
+O destroy termina com sucesso sem fazer nada quando o bucket de state ou o state do banco já não existem, então pode ser executado de novo sem quebrar.
+
+### Orquestração pelo ofisy-platform
+
+Além do `workflow_dispatch`, os workflows de deploy e destroy aceitam `workflow_call`, e o repositório [ofisy-platform](https://github.com/15SOAT-FIAP/ofisy-platform) os chama pelo `up.yml` (sobe o ambiente) e pelo `down.yml` (destrói), seguindo a ordem de execução descrita acima. Os secrets chegam por `secrets: inherit`, e o input `service` é o mesmo do disparo manual (padrão `all`). Quando chamado de outro repositório, o checkout usa a branch padrão (`master`) deste repositório.
+
+Nenhum valor é repassado como output: as etapas seguintes encontram os bancos pelo nome (ex.: `ms-ofisy-core-db`) via data source.
+
 ### Secrets Necessárias
 
 Definidas como **Organization Secrets** na org `15SOAT-FIAP`:

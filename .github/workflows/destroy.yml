@@ -9,6 +9,11 @@ on:
         default: all
         type: choice
         options: [all, core, billing, stock, execution, notification]
+  workflow_call:
+    inputs:
+      service:
+        type: string
+        default: all
 
 jobs:
   terraform-destroy:
@@ -35,6 +40,8 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v7
+        with:
+          repository: 15SOAT-FIAP/techchallenge-ofisy-db-infra
 
       - name: Configurar Credenciais AWS
         uses: aws-actions/configure-aws-credentials@v6
@@ -49,14 +56,21 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Terraform Init
+      - name: Terraform Destroy
         run: |
+          if ! aws s3api head-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" 2>/dev/null; then
+            echo "Bucket de state não existe, nada a destruir."
+            exit 0
+          fi
+
           terraform init \
             -backend-config="bucket=ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
             -backend-config="key=databases/${{ matrix.service }}/terraform.tfstate" \
             -backend-config="region=us-east-1"
 
-      - name: Terraform Destroy
-        run: |
+          if [ -z "$(terraform state list)" ]; then
+            echo "State vazio, nada a destruir."
+            exit 0
+          fi
           terraform destroy -auto-approve
           echo "### Banco ${{ matrix.service }} destruído com sucesso" >> $GITHUB_STEP_SUMMARY
