@@ -58,7 +58,7 @@ graph TD
 
 Cada RDS tem o próprio Security Group (`ms-ofisy-<service>-db-sg`), liberando a porta 5432 para o CIDR da VPC. Liberar pelo CIDR, e não pelo Security Group de cada cluster, deixa os bancos independentes dos clusters: recriar um cluster não exige um novo deploy do banco. Só o core libera também a Lambda de autenticação. A VPC, as subnets e o Security Group da Lambda são criados pela [infraestrutura base](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra) e localizados aqui por tag.
 
-A tabela `Notifications` usa `PAY_PER_REQUEST`, chave `id` e dois índices: `TypeIndex` (`type` + `createdAt`) e `ReferenceIdIndex` (`referenceId`).
+A tabela `Notifications` usa `PAY_PER_REQUEST`, chave `id` e os índices `TypeIndex` (`type` + `createdAt`), `ReferenceIdIndex` (`referenceId`) e `CustomerIdIndex` (`customerId` + `createdAt`).
 
 ---
 

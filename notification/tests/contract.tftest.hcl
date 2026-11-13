@@ -16,7 +16,8 @@ run "notification_contract" {
       } == {
       TypeIndex        = ["type", "createdAt", "ALL"]
       ReferenceIdIndex = ["referenceId", "", "ALL"]
+      CustomerIdIndex  = ["customerId", "createdAt", "ALL"]
     }
-    error_message = "Os índices devem ser TypeIndex (type/createdAt) e ReferenceIdIndex (referenceId), com projeção ALL."
+    error_message = "Os índices TypeIndex, ReferenceIdIndex e CustomerIdIndex devem ter as chaves e projeções esperadas."
   }
 }
