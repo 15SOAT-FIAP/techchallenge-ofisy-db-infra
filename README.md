@@ -72,14 +72,14 @@ flowchart TD
     P2["2 · eks-infra — eks/&lt;service&gt;/<br/>Cluster EKS de cada microsserviço"]
     P3["2 · db-infra — deploy (all)<br/>Bancos dos microsserviços"]
     P4["3 · eks-infra — infra-auth/<br/>Lambda de autenticacao"]
-    P5["4 · Microsserviços no EKS"]
+    P5["3 · Microsserviços no EKS"]
 
     P1 --> P2 --> P5
-    P1 --> P3 --> P4 --> P5
+    P1 --> P3 --> P4
     P3 --> P5
 ```
 
-Clusters e bancos não dependem uns dos outros e podem subir em paralelo.
+Clusters e bancos não dependem uns dos outros e podem subir em paralelo. A Lambda depende do banco do core, mas os microsserviços não dependem da Lambda: ela só é pré-requisito do API Gateway.
 
 O DynamoDB do notification não depende de rede nem de cluster.
 
